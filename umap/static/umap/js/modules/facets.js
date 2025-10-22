@@ -24,7 +24,7 @@ export default class Facets {
       this.selected[name] = selected
     }
 
-    this._umap.datalayers.browsable().map((datalayer) => {
+    this._umap.eachBrowsableDataLayer((datalayer) => {
       datalayer.eachFeature((feature) => {
         for (const name of names) {
           let value = feature.properties[name]

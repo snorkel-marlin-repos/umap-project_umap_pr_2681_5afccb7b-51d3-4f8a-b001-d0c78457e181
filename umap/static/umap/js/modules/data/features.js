@@ -22,6 +22,7 @@ class Feature {
   constructor(umap, datalayer, geojson = {}, id = null) {
     this._umap = umap
     this.sync = umap.syncEngine.proxy(this)
+    this._isDirty = false
     this._ui = null
 
     // DataLayer the feature belongs to
@@ -51,6 +52,17 @@ class Feature {
         this.id = Utils.generateId()
       }
     }
+  }
+
+  set isDirty(status) {
+    this._isDirty = status
+    if (this.datalayer) {
+      this.datalayer.isDirty = status
+    }
+  }
+
+  get isDirty() {
+    return this._isDirty
   }
 
   get ui() {
@@ -355,6 +367,7 @@ class Feature {
   }
 
   del(sync) {
+    this.isDirty = true
     this._umap._leafletMap.closePopup()
     if (this.datalayer) {
       this.datalayer.removeFeature(this, sync)
@@ -399,11 +412,13 @@ class Feature {
 
   changeDataLayer(datalayer) {
     if (this.datalayer) {
+      this.datalayer.isDirty = true
       this.datalayer.removeFeature(this)
     }
 
     datalayer.addFeature(this)
     this.sync.upsert(this.toGeoJSON())
+    datalayer.isDirty = true
     this.redraw()
   }
 
@@ -470,6 +485,7 @@ class Feature {
 
   deleteProperty(property) {
     delete this.properties[property]
+    this.isDirty = true
   }
 
   renameProperty(from, to) {
@@ -562,6 +578,7 @@ class Feature {
     delete geojson.id
     delete geojson.properties.id
     const feature = this.datalayer.makeFeature(geojson)
+    feature.isDirty = true
     feature.edit()
     return feature
   }
@@ -597,7 +614,7 @@ class Feature {
         this.datalayer.hideFeature(this)
         this.makeUI()
         this.datalayer.showFeature(this)
-      } else {
+      } else if (this.datalayer?.isBrowsable()) {
         this.ui._redraw()
       }
     }
@@ -1036,6 +1053,7 @@ export class LineString extends Path {
     this.pullGeometry()
     if (!this.ui.editEnabled()) this.edit()
     this.ui.editor.reset()
+    this.isDirty = true
   }
 
   isMulti() {

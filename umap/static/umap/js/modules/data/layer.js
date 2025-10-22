@@ -64,9 +64,6 @@ export class DataLayer {
 
     this.setOptions(data)
     this.pane.dataset.id = this.id
-    if (this.options.rank === undefined) {
-      this.options.rank = this._umap.datalayers.count()
-    }
 
     if (!Utils.isObject(this.options.remoteData)) {
       this.options.remoteData = {}
@@ -155,9 +152,6 @@ export class DataLayer {
           break
         case 'remote-data':
           this.fetchRemoteData()
-          break
-        case 'datalayer-rank':
-          this._umap.reorderDataLayers()
           break
       }
     }
@@ -255,9 +249,16 @@ export class DataLayer {
     if (!error) {
       this._umap.modifiedAt = response.headers.get('last-modified')
       this.setReferenceVersion({ response, sync: false })
-      delete geojson._umap_options
+      // FIXME: for now the _umap_options property is set dynamically from backend
+      // And thus it's not in the geojson file in the server
+      // So do not let all options to be reset
+      // Fix is a proper migration so all datalayers settings are
+      // in DB, and we remove it from geojson flat files.
+      if (geojson._umap_options) {
+        geojson._umap_options.editMode = this.options.editMode
+      }
       // In case of maps pre 1.0 still around
-      delete geojson._storage
+      if (geojson._storage) geojson._storage.editMode = this.options.editMode
       await this.fromUmapGeoJSON(geojson)
       this.backupOptions()
       this._loading = false
@@ -286,12 +287,22 @@ export class DataLayer {
 
   async fromUmapGeoJSON(geojson) {
     if (geojson._storage) geojson._umap_options = geojson._storage // Retrocompat
+    geojson._umap_options.id = this.id
     if (geojson._umap_options) this.setOptions(geojson._umap_options)
     if (this.isRemoteLayer()) {
       await this.fetchRemoteData()
     } else {
       this.fromGeoJSON(geojson, false)
     }
+  }
+
+  clear() {
+    this.sync.startBatch()
+    for (const feature of Object.values(this._features)) {
+      feature.del()
+    }
+    this.sync.commitBatch()
+    this.dataChanged()
   }
 
   backupData() {
@@ -344,7 +355,7 @@ export class DataLayer {
       url = this._umap.proxyUrl(url, this.options.remoteData.ttl)
     }
     return await this.getUrl(url, remoteUrl).then((raw) => {
-      this.clear(false)
+      this.clear()
       return this._umap.formatter
         .parse(raw, this.options.remoteData.format)
         .then((geojson) => this.fromGeoJSON(geojson, false))
@@ -384,7 +395,12 @@ export class DataLayer {
   }
 
   connectToMap() {
-    this._umap.datalayers.add(this)
+    if (!this._umap.datalayers[this.id]) {
+      this._umap.datalayers[this.id] = this
+    }
+    if (!this._umap.datalayersIndex.includes(this)) {
+      this._umap.datalayersIndex.push(this)
+    }
     this._umap.onDataLayersChanged()
   }
 
@@ -628,33 +644,16 @@ export class DataLayer {
 
   del(sync = true) {
     const oldValue = Utils.CopyJSON(this.umapGeoJSON())
-    // TODO merge datalayer del and features del in same
-    // batch
-    this.clear()
+    this.erase()
     if (sync) {
       this.isDeleted = true
       this.sync.delete(oldValue)
     }
-    this.hide()
-    this.parentPane.removeChild(this.pane)
-    this._umap.onDataLayersChanged()
-    this.layer.onDelete(this._leafletMap)
-    this.propagateDelete()
-    this._leaflet_events_bk = this._leaflet_events
   }
 
   empty() {
     if (this.isRemoteLayer()) return
-    this.sync.startBatch()
     this.clear()
-    this.sync.commitBatch()
-  }
-
-  clear(sync = true) {
-    for (const feature of Object.values(this._features)) {
-      feature.del(sync)
-    }
-    this.dataChanged()
   }
 
   clone() {
@@ -665,6 +664,17 @@ export class DataLayer {
     const datalayer = this._umap.createDirtyDataLayer(options)
     datalayer.fromGeoJSON(geojson)
     return datalayer
+  }
+
+  erase() {
+    this.hide()
+    this._umap.datalayersIndex.splice(this.getRank(), 1)
+    this.parentPane.removeChild(this.pane)
+    this._umap.onDataLayersChanged()
+    this.layer.onDelete(this._leafletMap)
+    this.propagateDelete()
+    this._leaflet_events_bk = this._leaflet_events
+    this.clear()
   }
 
   redraw() {
@@ -1081,11 +1091,23 @@ export class DataLayer {
   }
 
   getPreviousBrowsable() {
-    return this._umap.datalayers.prev(this)
+    let id = this.getRank()
+    let next
+    const index = this._umap.datalayersIndex
+    while (((id = index[++id] ? id : 0), (next = index[id]))) {
+      if (next === this || next.canBrowse()) break
+    }
+    return next
   }
 
   getNextBrowsable() {
-    return this._umap.datalayers.next(this)
+    let id = this.getRank()
+    let prev
+    const index = this._umap.datalayersIndex
+    while (((id = index[--id] ? id : index.length - 1), (prev = index[id]))) {
+      if (prev === this || prev.canBrowse()) break
+    }
+    return prev
   }
 
   umapGeoJSON() {
@@ -1096,8 +1118,8 @@ export class DataLayer {
     }
   }
 
-  getDOMOrder() {
-    return Array.from(this.parentPane.children).indexOf(this.pane)
+  getRank() {
+    return this._umap.datalayersIndex.indexOf(this)
   }
 
   isReadOnly() {
@@ -1119,12 +1141,6 @@ export class DataLayer {
     }
   }
 
-  prepareOptions() {
-    const options = Utils.CopyJSON(this.options)
-    delete options.permissions
-    return JSON.stringify(options)
-  }
-
   async save() {
     if (this.isDeleted) return await this.saveDelete()
     if (!this.isRemoteLayer() && !this.isLoaded()) return
@@ -1132,8 +1148,8 @@ export class DataLayer {
     const formData = new FormData()
     formData.append('name', this.options.name)
     formData.append('display_on_load', !!this.options.displayOnLoad)
-    formData.append('rank', this.options.rank)
-    formData.append('settings', this.prepareOptions())
+    formData.append('rank', this.getRank())
+    formData.append('settings', JSON.stringify(this.options))
     // Filename support is shaky, don't do it for now.
     const blob = new Blob([JSON.stringify(geojson)], { type: 'application/json' })
     formData.append('geojson', blob)
@@ -1176,7 +1192,7 @@ export class DataLayer {
       // Response contains geojson only if save has conflicted and conflicts have
       // been resolved. So we need to reload to get extra data (added by someone else)
       if (data.geojson) {
-        this.clear(false)
+        this.clear()
         this.fromGeoJSON(data.geojson)
         delete data.geojson
       }

@@ -50,8 +50,6 @@ def test_created_markers_are_merged(context, live_server, tilelayer):
         "editMode": "advanced",
         "inCaption": True,
         "id": str(datalayer.pk),
-        "rank": 0,
-        "remoteData": {},
     }
 
     # Now navigate to this map from another tab
@@ -89,8 +87,6 @@ def test_created_markers_are_merged(context, live_server, tilelayer):
         "inCaption": True,
         "editMode": "advanced",
         "id": str(datalayer.pk),
-        "rank": 0,
-        "remoteData": {},
     }
 
     # Now create another marker in the first tab
@@ -109,8 +105,7 @@ def test_created_markers_are_merged(context, live_server, tilelayer):
         "inCaption": True,
         "editMode": "advanced",
         "id": str(datalayer.pk),
-        "rank": 0,
-        "remoteData": {},
+        "permissions": {"edit_status": 1},
     }
 
     # And again
@@ -129,8 +124,7 @@ def test_created_markers_are_merged(context, live_server, tilelayer):
         "inCaption": True,
         "editMode": "advanced",
         "id": str(datalayer.pk),
-        "rank": 0,
-        "remoteData": {},
+        "permissions": {"edit_status": 1},
     }
     expect(marker_pane_p1).to_have_count(4)
 
@@ -151,8 +145,7 @@ def test_created_markers_are_merged(context, live_server, tilelayer):
         "inCaption": True,
         "editMode": "advanced",
         "id": str(datalayer.pk),
-        "rank": 0,
-        "remoteData": {},
+        "permissions": {"edit_status": 1},
     }
     expect(marker_pane_p2).to_have_count(5)
 
@@ -278,8 +271,7 @@ def test_same_second_edit_doesnt_conflict(context, live_server, tilelayer):
         "inCaption": True,
         "editMode": "advanced",
         "id": str(datalayer.pk),
-        "rank": 0,
-        "remoteData": {},
+        "permissions": {"edit_status": 1},
     }
 
 
